@@ -1,5 +1,6 @@
 import asyncio
 import random
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart, CommandObject
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -10,6 +11,7 @@ from database import get_user, init_db, update_balance, claim_daily_bonus
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# --- Клавиатуры ---
 def get_main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎮 Играть", callback_data="games")],
@@ -36,17 +38,14 @@ def get_roulette_keyboard():
         [InlineKeyboardButton(text="🔙 К играм", callback_data="games")]
     ])
 
+# --- Обработчики ---
 @dp.message(CommandStart())
 async def cmd_start(message: Message, command: CommandObject):
     user_id = message.from_user.id
     username = message.from_user.username or "Игрок"
-
-    referrer_id = None
-    if command.args and command.args.isdigit():
-        referrer_id = int(command.args)
+    referrer_id = int(command.args) if command.args and command.args.isdigit() else None
 
     await get_user(user_id, username, referrer_id)
-
     text = (
         f"👑 **Добро пожаловать в GRAM!**\n\n"
         f"GRAM — крутой игровой бот с большим выбором разнообразных игр.\n\n"
@@ -71,7 +70,7 @@ async def cb_daily_bonus(call: types.CallbackQuery):
     else:
         hours = result // 3600
         minutes = (result % 3600) // 60
-        await call.answer(f"⏳ Следующий бонус можно забрать через {hours} ч. {minutes} мин.", show_alert=True)
+        await call.answer(f"⏳ Следующий бонус через {hours} ч. {minutes} мин.", show_alert=True)
 
 @dp.callback_query(F.data == "referral")
 async def cb_referral(call: types.CallbackQuery):
@@ -99,21 +98,18 @@ async def cb_play_roulette(call: types.CallbackQuery):
     choice = call.data.split("_")[1]
     bet = 200
     balance = await get_user(call.from_user.id, call.from_user.username)
-
+    
     if balance < bet:
         return await call.answer("❌ Недостаточно GRAM (нужно 200)!", show_alert=True)
-
+    
     spin = random.randint(0, 36)
     if spin == 0:
-        result_color = "zero"
-        symbol = "🟢 Зеро (0)"
+        result_color, symbol = "zero", "🟢 Зеро (0)"
     elif spin % 2 == 0:
-        result_color = "red"
-        symbol = f"🔴 Красное ({spin})"
+        result_color, symbol = "red", f"🔴 Красное ({spin})"
     else:
-        result_color = "black"
-        symbol = f"⚫ Черное ({spin})"
-
+        result_color, symbol = "black", f"⚫ Черное ({spin})"
+        
     if choice == result_color:
         multiplier = 14 if choice == "zero" else 2
         win_amount = bet * multiplier
@@ -125,8 +121,21 @@ async def cb_play_roulette(call: types.CallbackQuery):
 
     await call.message.edit_text(text, reply_markup=get_roulette_keyboard(), parse_mode="Markdown")
 
+# --- Сервер заглушка для Render ---
+async def handle_ping(request):
+    return web.Response(text="Bot is running perfectly!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 10000)
+    await site.start()
+
 async def main():
     await init_db()
+    await start_web_server()  # Запускаем отклик для Render
     print("Бот GRAM успешно запущен!")
     await dp.start_polling(bot)
 
